@@ -1,8 +1,9 @@
-/* 4-Panel Rich Copy Tool
-   - contenteditable rich areas
-   - toolbar (font/size/color/basic formatting)
-   - copy as HTML + plain text fallback (good for Outlook)
-   - no persistence (refresh clears)
+/* copy-panels — Slim white UI
+   - 4 stacked rich editors (contenteditable)
+   - formatting: font, size, bold/italic/underline, bullets, alignment, clear
+   - COPY copies HTML + plain-text fallback (Outlook-friendly)
+   - No persistence (refresh clears)
+   - Default text black
 */
 
 const PANEL_COUNT = 4;
@@ -35,13 +36,11 @@ function showToast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.add("show");
   window.clearTimeout(showToast._t);
-  showToast._t = window.setTimeout(() => toastEl.classList.remove("show"), 1400);
+  showToast._t = window.setTimeout(() => toastEl.classList.remove("show"), 1200);
 }
 
-// Ensure execCommand uses CSS styles where possible
-try {
-  document.execCommand("styleWithCSS", false, true);
-} catch (_) { /* ignore */ }
+// Prefer CSS inline formatting where supported
+try { document.execCommand("styleWithCSS", false, true); } catch (_) {}
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -55,13 +54,12 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-function sanitizeForEmail(html) {
-  // Outlook is generally fine with inline styles.
-  // Wrap in a container to keep consistent base font if user leaves parts unstyled.
-  // (The user can still override with toolbar.)
+function sanitizeForEmail(innerHtml) {
+  // Keep black as base; let the editor set font/size styles.
+  // Wrap so Outlook keeps a consistent base if some parts are unstyled.
   return `
-<div style="font-family: Segoe UI, Arial, sans-serif;">
-${html}
+<div style="font-family: Segoe UI, Arial, sans-serif; color:#000;">
+${innerHtml}
 </div>`.trim();
 }
 
@@ -71,7 +69,7 @@ function htmlToPlainText(html) {
   return tmp.innerText;
 }
 
-function clampSelectionToEditor(editor) {
+function selectionInside(editor) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return false;
   const range = sel.getRangeAt(0);
@@ -80,7 +78,6 @@ function clampSelectionToEditor(editor) {
 
 function focusEditor(editor) {
   editor.focus();
-  // If editor is empty, place caret inside
   if (editor.innerHTML.trim() === "") {
     editor.innerHTML = "<div><br></div>";
     const range = document.createRange();
@@ -93,14 +90,8 @@ function focusEditor(editor) {
 }
 
 function exec(editor, command, value = null) {
-  // Only apply command if selection is inside editor; otherwise focus editor first
-  if (!clampSelectionToEditor(editor)) focusEditor(editor);
-
-  try {
-    document.execCommand(command, false, value);
-  } catch (_) {
-    // execCommand can fail in some locked-down contexts; ignore gracefully
-  }
+  if (!selectionInside(editor)) focusEditor(editor);
+  try { document.execCommand(command, false, value); } catch (_) {}
   editor.focus();
 }
 
@@ -108,18 +99,8 @@ function applyFont(editor, fontName) {
   exec(editor, "fontName", fontName);
 }
 
-function applyColor(editor, hexColor) {
-  exec(editor, "foreColor", hexColor);
-}
-
 function applyAlign(editor, align) {
-  // align: left|center|right|justify
-  const map = {
-    left: "justifyLeft",
-    center: "justifyCenter",
-    right: "justifyRight",
-    justify: "justifyFull"
-  };
+  const map = { left:"justifyLeft", center:"justifyCenter", right:"justifyRight", justify:"justifyFull" };
   exec(editor, map[align] || "justifyLeft");
 }
 
@@ -129,10 +110,14 @@ function applyBullets(editor) {
 
 function clearFormatting(editor) {
   exec(editor, "removeFormat");
+  // Re-force black base after clear
+  editor.querySelectorAll("*").forEach(n => {
+    if (n.style && n.style.color) n.style.color = "#000";
+  });
 }
 
 function applyFontSizePx(editor, px) {
-  // execCommand supports fontSize 1-7. We'll map to 1-7 then normalize to px.
+  // Map px to legacy 1–7, then normalize to spans with px for Outlook reliability.
   const bucket = px <= 12 ? 2
                : px <= 14 ? 3
                : px <= 16 ? 4
@@ -141,9 +126,6 @@ function applyFontSizePx(editor, px) {
                : 7;
 
   exec(editor, "fontSize", String(bucket));
-
-  // Normalize any <font size="..."> to <span style="font-size:XXpx">
-  // This improves Outlook reliability.
   normalizeFontTags(editor, px);
 }
 
@@ -153,23 +135,32 @@ function normalizeFontTags(editor, px) {
     const span = document.createElement("span");
     span.style.fontSize = `${px}px`;
 
-    // Preserve color/face if present (some browsers use these attrs)
     const face = f.getAttribute("face");
     if (face) span.style.fontFamily = face;
-    const color = f.getAttribute("color");
-    if (color) span.style.color = color;
+
+    // Force black always
+    span.style.color = "#000";
 
     span.innerHTML = f.innerHTML;
     f.replaceWith(span);
   });
+
+  // Also force any inline color to black (you said all text will be black)
+  editor.querySelectorAll("*").forEach(n => {
+    if (n.style) n.style.color = "#000";
+  });
 }
 
 async function copyRich(editor) {
-  const rawHtml = editor.innerHTML.trim();
-  const html = sanitizeForEmail(rawHtml === "" ? "<div></div>" : rawHtml);
+  // Ensure black everywhere
+  editor.querySelectorAll("*").forEach(n => {
+    if (n.style) n.style.color = "#000";
+  });
+
+  const raw = editor.innerHTML.trim();
+  const html = sanitizeForEmail(raw === "" ? "<div></div>" : raw);
   const text = htmlToPlainText(html);
 
-  // Prefer async clipboard with both text/html and text/plain
   try {
     if (navigator.clipboard && window.ClipboardItem) {
       const item = new ClipboardItem({
@@ -177,15 +168,14 @@ async function copyRich(editor) {
         "text/plain": new Blob([text], { type: "text/plain" })
       });
       await navigator.clipboard.write([item]);
-      showToast("Copied with formatting ✅");
+      showToast("Copied ✅");
       return;
     }
   } catch (_) {
-    // fallback below
+    // fallback
   }
 
-  // Fallback: select editor contents then execCommand('copy')
-  // This usually preserves formatting when pasting into Outlook.
+  // Fallback: select editor contents and execCommand copy
   try {
     const range = document.createRange();
     range.selectNodeContents(editor);
@@ -208,28 +198,21 @@ function buildPanel(i) {
     contenteditable: "true",
     spellcheck: "true",
     "data-editor": String(idx),
-    html: `<div style="font-family: Segoe UI, Arial, sans-serif; font-size: 14px;">
-      <b>Panel ${idx}</b> — type here…
+    html: `<div style="font-family: Segoe UI, Arial, sans-serif; font-size:14px; color:#000;">
+      Panel ${idx} — type here…
     </div>`
   });
 
   // Controls
   const fontSelect = el("select", { class: "control" });
-  FONT_OPTIONS.forEach(opt => {
-    fontSelect.appendChild(el("option", { value: opt.value, html: opt.label }));
-  });
+  FONT_OPTIONS.forEach(opt => fontSelect.appendChild(el("option", { value: opt.value, html: opt.label })));
   fontSelect.value = "Segoe UI";
   fontSelect.addEventListener("change", () => applyFont(editor, fontSelect.value));
 
   const sizeSelect = el("select", { class: "control small" });
-  SIZE_OPTIONS.forEach(opt => {
-    sizeSelect.appendChild(el("option", { value: String(opt.px), html: opt.label }));
-  });
+  SIZE_OPTIONS.forEach(opt => sizeSelect.appendChild(el("option", { value: String(opt.px), html: opt.label })));
   sizeSelect.value = "14";
   sizeSelect.addEventListener("change", () => applyFontSizePx(editor, Number(sizeSelect.value)));
-
-  const colorInput = el("input", { class: "control color", type: "color", value: "#e8eefc" });
-  colorInput.addEventListener("input", () => applyColor(editor, colorInput.value));
 
   const btnB = el("button", { class: "btn icon", type: "button", title: "Bold", html: "B" });
   btnB.addEventListener("click", () => exec(editor, "bold"));
@@ -255,31 +238,27 @@ function buildPanel(i) {
   const btnClear = el("button", { class: "btn", type: "button", title: "Clear formatting", html: "Clear" });
   btnClear.addEventListener("click", () => clearFormatting(editor));
 
-  const copyBtn = el("button", { class: "btn copy", type: "button", html: "COPY" });
+  const copyBtn = el("button", { class: "copyBig", type: "button", html: "COPY" });
   copyBtn.addEventListener("click", () => copyRich(editor));
 
   const panel = el("article", { class: "panel" }, [
     el("div", { class: "panelHead" }, [
       el("div", { class: "title" }, [
         el("div", { class: "badge", html: String(idx) }),
-        el("div", {}, [
-          el("h2", { html: `Panel ${idx}` }),
-          el("span", { html: "Rich text editor (Outlook-friendly copy)" })
-        ])
+        el("h2", { html: `Panel ${idx}` })
       ])
     ]),
     el("div", { class: "tools" }, [
-      fontSelect, sizeSelect, colorInput,
+      fontSelect, sizeSelect,
       btnB, btnI, btnU,
       btnBul,
       btnLeft, btnCenter, btnRight,
       btnClear
     ]),
-    el("div", { class: "editorWrap" }, [
+    el("div", { class: "editorRow" }, [
       editor,
-      el("div", { class: "hint", html: "Tip: Click inside the editor first, then use the toolbar for best results." })
-    ]),
-    el("div", { class: "panelFoot" }, [ copyBtn ])
+      copyBtn
+    ])
   ]);
 
   return panel;
@@ -293,4 +272,3 @@ function init() {
 }
 
 init();
-
