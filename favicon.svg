@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#ffffff" stroke="#e5e7eb" stroke-width="1"/>
+  <!-- Back panel -->
+  <rect x="10" y="5" width="16" height="18" rx="2" fill="#6b7280"/>
+  <!-- Front panel -->
+  <rect x="6" y="9" width="16" height="18" rx="2" fill="#111827"/>
+  <!-- Lines -->
+  <line x1="9" y1="14" x2="19" y2="14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="9" y1="18" x2="19" y2="18" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="9" y1="22" x2="15" y2="22" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
